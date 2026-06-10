@@ -11,26 +11,43 @@ pip install -r requirements.txt
 
 ### 2. Check Your Device
 Run this to list available audio devices:
-```python
-import sounddevice as sd
-print(sd.query_devices())
+```bash
+python -m sounddevice
 ```
-Ensure you see your Axagon ADA-71 device with at least 2 input channels.
+Ensure you see your Axagon ADA-71 (shows up in Windows as "USB Sound Device") with at least 2 input channels. Note that its **Microphone** jack is mono (signal on the left/tip contact only) — for two-channel recording, use the stereo **Line In** jack.
+
+### 3. Configure the Device
+Acquisition device selection lives at the top of [emg_acquisition.py](emg_acquisition.py):
+
+- `ACQUISITION_DEVICE`: a sounddevice index (int) or a name pattern (str, case-insensitive, `*` wildcards allowed). A name pattern is recommended since indices shift when audio devices connect/disconnect. Default: `"Line*USB Sound Device*"`.
+- `ACQUISITION_HOSTAPI`: preferred host API substring when matching by name (e.g. `"WASAPI"`, `"DirectSound"`, `"MME"`). WASAPI has the lowest latency.
 
 ## Usage
 
-### Basic Recording (10 seconds)
-```python
-from emg_acquisition import EMGAcquisition
+### Quick Start
+```bash
+python quickstart.py
+```
+Runs a 5-second test recording using `ACQUISITION_DEVICE`, prints statistics, saves the data, and plots it — useful for verifying your setup.
 
-emg = EMGAcquisition(device_name="Axagon", sample_rate=44100, channels=2)
-emg.start_recording()  # Runs in background thread
-import time
+### Basic Recording
+```python
+from emg_acquisition import EMGAcquisition, ACQUISITION_DEVICE
+import threading, time
+
+emg = EMGAcquisition(device=ACQUISITION_DEVICE, sample_rate=None, channels=2, block_size=2048)
+
+record_thread = threading.Thread(target=emg.start_recording)
+record_thread.daemon = True
+record_thread.start()
+
 time.sleep(10)
 emg.stop_recording()
+emg.get_statistics()
 emg.save_data()
 emg.plot_data()
 ```
+`sample_rate=None` uses the device's default sample rate (48000 Hz for the ADA-71 in WASAPI shared mode).
 
 ### Real-Time Visualization
 ```bash
@@ -40,18 +57,19 @@ Shows live EMG signals from both channels while recording.
 
 ## Key Features
 
-- **Automatic Device Detection**: Finds Axagon ADA-71 by name
+- **Flexible Device Selection**: Resolve the input device by sounddevice index or by name pattern (with host API preference)
 - **Stereo Input**: Captures both L and R channels simultaneously
-- **Real-time Processing**: Non-blocking background recording with threading
+- **Real-time Processing**: Non-blocking background recording with threading (with WASAPI COM initialization handled automatically on Windows)
 - **Data Saving**: Exports as NPZ + JSON metadata
-- **Statistics**: RMS, peak-to-peak, mean, std dev per channel
+- **Statistics**: Mean, std dev, min, max, peak-to-peak, and RMS per channel
 - **Visualization**: Static and real-time plots
 
 ## Configuration
 
 ### Sample Rate
-- **44100 Hz** (default): Standard for audio interfaces
-- **48000 Hz**: Professional audio standard
+- `sample_rate=None` (default): Uses the device's default sample rate
+- **44100 Hz**: Standard for audio interfaces
+- **48000 Hz**: Professional audio standard (default for the ADA-71 under WASAPI)
 - Choose based on your EMG bandwidth requirements
 
 ### EMG Signal Considerations
