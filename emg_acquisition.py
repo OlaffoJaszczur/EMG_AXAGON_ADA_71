@@ -129,14 +129,27 @@ class EMGAcquisition:
         return data
 
     def save_data(self, filename=None):
-        """Save recorded data to file."""
+        """Save recorded data as one CSV per channel (time, data columns)."""
         if filename is None:
-            filename = f"emg_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.npz"
+            filename = f"emg_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         data = self.get_data()
         if data is None:
             print("No data to save")
-            return
+            return None
+
+        base = filename[:-4] if filename.lower().endswith('.csv') else filename
+        time_axis = np.arange(len(data)) / self.sample_rate
+
+        channel_names = ['L', 'R']
+        saved_files = []
+        for ch in range(self.channels):
+            ch_filename = f"{base}_{channel_names[ch]}.csv"
+            channel_data = np.column_stack((time_axis, data[:, ch]))
+            np.savetxt(ch_filename, channel_data, delimiter=',',
+                       header='time,data', comments='', fmt='%.10g')
+            saved_files.append(ch_filename)
+            print(f"Data saved to {ch_filename}")
 
         metadata = {
             'sample_rate': self.sample_rate,
@@ -145,15 +158,11 @@ class EMGAcquisition:
             'duration_sec': len(data) / self.sample_rate,
             'timestamp': datetime.now().isoformat()
         }
-
-        np.savez(filename, data=data)
-
-        with open(filename.replace('.npz', '_metadata.json'), 'w') as f:
+        with open(f"{base}_metadata.json", 'w', encoding='utf-8') as f:
             json.dump(metadata, f, indent=2)
 
-        print(f"Data saved to {filename}")
         print(f"Duration: {metadata['duration_sec']:.2f} seconds")
-        return filename
+        return saved_files
 
     def plot_data(self):
         """Plot recorded EMG data."""

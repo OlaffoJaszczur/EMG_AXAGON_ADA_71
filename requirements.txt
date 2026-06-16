@@ -2,3 +2,7 @@ sounddevice
 numpy
 matplotlib
 scipy
+pandas
+plotly
+ipywidgets
+nbformat

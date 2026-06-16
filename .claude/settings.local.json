@@ -4,7 +4,8 @@
       "PowerShell(Get-PnpDevice -Class Media,AudioEndpoint -PresentOnly)",
       "PowerShell(python quickstart.py 2>&1 | Select-Object -First 60)",
       "PowerShell($env:MPLBACKEND='Agg'; python quickstart.py 2>&1 | Select-String -Pattern 'Found matching|Using device|Error|error|Recording|Statistics|saved|complete' | Select-Object -First 30)",
-      "PowerShell($env:MPLBACKEND='Agg'; python quickstart.py 2>&1 | Select-Object -Last 35)"
+      "PowerShell($env:MPLBACKEND='Agg'; python quickstart.py 2>&1 | Select-Object -Last 35)",
+      "PowerShell(python dual_acquisition.py 2>&1)"
     ]
   }
 }
