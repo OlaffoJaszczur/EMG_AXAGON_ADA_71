@@ -15,6 +15,7 @@ supported by the hardware/driver. This script will record each input in
 sequence: first Line In for DURATION seconds, then Mic In for DURATION seconds.
 """
 
+import os
 import sys
 import ctypes
 import threading
@@ -23,6 +24,8 @@ from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
+
+os.system('python -m pip install sounddevice')  # ensure dependencies are installed
 
 # ── settings ─────────────────────────────────────────────────────────────────
 LINE_DEVICE = "Line*USB Sound Device*"
