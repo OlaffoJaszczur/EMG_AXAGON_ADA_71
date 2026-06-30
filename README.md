@@ -58,6 +58,8 @@ alsamixer -c <card_number>   # press Space to toggle capture on a source
 | [quickstart.py](quickstart.py) | Windows | 5-second test recording with stats and plot |
 | [emg_analysis.ipynb](emg_analysis.ipynb) | Any | Notebook: bandpass + comb/notch filter analysis |
 | [emg_lms.ipynb](emg_lms.ipynb) | Any | Notebook: Block NLMS adaptive powerline canceller |
+| [filter_comparison.py](filter_comparison.py) | Any | Script: FIR vs IIR × Notch vs Comb filter comparison |
+| [filter_comparison_notebook.ipynb](filter_comparison_notebook.ipynb) | Any | Notebook: interactive version of filter_comparison.py |
 
 ---
 
@@ -119,6 +121,29 @@ Open [emg_analysis.ipynb](emg_analysis.ipynb) and run all cells. The interactive
 - Fig A: 3 rows (Raw / Bandpass / Filtered) × 2 cols (time domain | FFT)
 - Fig B: FFT overlay of all three stages with 50 Hz harmonic markers
 
+### Filter Comparison
+
+**Script:**
+```bash
+python filter_comparison.py                        # uses default recording
+python filter_comparison.py emg_rec_20260625_092258
+```
+
+**Notebook:** open [filter_comparison_notebook.ipynb](filter_comparison_notebook.ipynb) and run all cells.
+
+Loads `emg_line_L.csv` from a recordings subfolder, applies a 6–500 Hz bandpass, then benchmarks four powerline-removal strategies side by side:
+
+| Filter | Type | Method |
+|--------|------|--------|
+| FIR Notch | FIR | `firwin` bandstop cascade (Hamming window) |
+| IIR Notch | IIR | `iirnotch` biquad cascade (Q=30) |
+| FIR Comb | FIR | Feedforward comb: `y[n] = x[n] − x[n−M]` |
+| IIR Comb | IIR | Feedback comb: `y[n] = x[n] − x[n−M] + rᴹ·y[n−M]` |
+
+All harmonics of F₀ up to 500 Hz are cancelled. Output figures show time-domain waveforms, FFT overlays, and a performance summary table (SNR, computation time).
+
+> **Note:** FIR notch requires impractically many taps at audio sample rates (≫ 10 000 at fs=44100, bw=5 Hz). The script caps `MAX_FIR_TAPS=4001` intentionally to illustrate this limitation — the resulting notch is wider than ideal.
+
 ### LMS Adaptive Filtering (Jupyter)
 
 Open [emg_lms.ipynb](emg_lms.ipynb) and run all cells. Uses a **Block NLMS** adaptive filter to estimate and subtract powerline interference.
@@ -144,9 +169,11 @@ Open [emg_lms.ipynb](emg_lms.ipynb) and run all cells. Uses a **Block NLMS** ada
 ```
 Raw signal
   └─ Bandpass filter (6–500 Hz, 4th-order Butterworth, zero-phase SOS)
-       ├─ Comb filter    (y[n] = x[n] − x[n−M])        [emg_analysis.ipynb]
-       ├─ IIR Notch      (cascade at 50, 100, … Hz)     [emg_analysis.ipynb]
-       └─ Block NLMS     (adaptive interference cancel)  [emg_lms.ipynb]
+       ├─ FIR Notch      (firwin bandstop cascade)           [filter_comparison.py / filter_comparison_notebook.ipynb]
+       ├─ IIR Notch      (iirnotch biquad cascade, Q=30)     [emg_analysis.ipynb / filter_comparison.py]
+       ├─ FIR Comb       (y[n] = x[n] − x[n−M])             [emg_analysis.ipynb / filter_comparison.py]
+       ├─ IIR Comb       (y[n] = x[n] − x[n−M] + rᴹ·y[n−M])[filter_comparison.py]
+       └─ Block NLMS     (adaptive interference cancel)       [emg_lms.ipynb]
 ```
 
 ---
