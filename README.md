@@ -1,6 +1,6 @@
 # EMG Data Acquisition from Axagon ADA-71 Sound Card
 
-Python tools for acquiring, visualizing, and filtering EMG (electromyography) signals from the Axagon ADA-71 USB audio interface.
+Python tools for acquiring, visualizing, and filtering EMG (electromyography) signals from the Axagon ADA-71 USB audio interface — including powerline-removal filters (notch, comb, adaptive LMS) and standalone studies of filter order and passband normalization.
 
 ## Setup
 
@@ -60,6 +60,9 @@ alsamixer -c <card_number>   # press Space to toggle capture on a source
 | [emg_lms.ipynb](emg_lms.ipynb) | Any | Notebook: Block NLMS adaptive powerline canceller |
 | [filter_comparison.py](filter_comparison.py) | Any | Script: FIR vs IIR × Notch vs Comb filter comparison |
 | [filter_comparison_notebook.ipynb](filter_comparison_notebook.ipynb) | Any | Notebook: interactive version of filter_comparison.py |
+| [comb_filter_verification.py](comb_filter_verification.py) | Any | Script: comb-filter order (1–10) sweep + passband-normalization study → interactive Plotly HTML |
+| [notch_filter_verification.py](notch_filter_verification.py) | Any | Script: notch-filter order (1–10) sweep → interactive Plotly HTML |
+| [notch_filter_normalized.py](notch_filter_normalized.py) | Any | Script: notch filters normalized to unity passband (original vs normalized) → interactive Plotly HTML |
 
 ---
 
@@ -144,6 +147,49 @@ All harmonics of F₀ up to 500 Hz are cancelled. Output figures show time-domai
 
 > **Note:** FIR notch requires impractically many taps at audio sample rates (≫ 10 000 at fs=44100, bw=5 Hz). The script caps `MAX_FIR_TAPS=4001` intentionally to illustrate this limitation — the resulting notch is wider than ideal.
 
+### Filter Order & Normalization Studies
+
+Three standalone scripts drill deeper into a single filter family, sweeping the
+**cascade order 1–10** and measuring how order trades off harmonic rejection,
+EMG preservation, passband gain, and compute time. Each loads `emg_line_L.csv`
+from a recording, applies the 6–500 Hz bandpass reference, then writes a set of
+**self-contained interactive Plotly HTML files** (open in any browser — drag to
+zoom, click the legend to toggle traces) plus a color-coded console table.
+
+```bash
+python comb_filter_verification.py [recording_folder]   # comb filters
+python notch_filter_verification.py [recording_folder]  # notch filters
+python notch_filter_normalized.py [recording_folder]    # notch normalization
+```
+
+| Script | Focus | HTML outputs |
+|--------|-------|--------------|
+| [comb_filter_verification.py](comb_filter_verification.py) | FIR/IIR **comb**, order 1–10, **ORIGINAL vs PATCHED** (passband normalized). Shows the comb's between-harmonic passband arch (`4^order` for FIR under `filtfilt`, up to +60 dB), the normalization that fixes it, and per-order timing. | `comb_filter_results_table`, `comb_filter_freq_response` (dB), `comb_filter_freq_response_linear`, `comb_filter_time_overlay` |
+| [notch_filter_verification.py](notch_filter_verification.py) | FIR/IIR **notch**, order 1–10, with a recommended order. IIR notch (biquad SOS cascade) preserves EMG and is cheap; the capped FIR notch is wide and destroys EMG. | `notch_filter_results_table`, `notch_filter_freq_response` (dB), `notch_filter_freq_response_linear`, `notch_filter_time_overlay` |
+| [notch_filter_normalized.py](notch_filter_normalized.py) | Notch **passband normalized to 1** (ORIGINAL vs NORMALIZED). Confirms the IIR notch is already exactly unity (normalization is a no-op) while the FIR notch has only a small window-ripple overshoot (≤ +0.43 dB at order 10). | `notch_norm_results_table`, `notch_norm_freq_response` (dB), `notch_norm_freq_response_linear` |
+
+Every results table reports, per filter × order, the passband peak, filtfilt
+gain (dB **and** linear), harmonic attenuation at 50/100 Hz (dB **and** linear),
+RMS vs the bandpass reference, and the apply time.
+
+**Key findings from these studies**
+
+- **Comb passband amplification.** The feedforward comb `1 − z⁻ᴹ` arches to a gain
+  of 2 between harmonics; `filtfilt` squares that to ×4 (+12 dB), and higher order
+  compounds it (`4^order`). The IIR comb `(1 − z⁻ᴹ)/(1 − r_m·z⁻ᴹ)` arches less but
+  still above 1. Scaling the numerator (FIR ×½, IIR ×(1+r_m)/2 per section, or the
+  whole cascade to unity) removes the boost. **Recommended: FIR comb order 1, IIR
+  comb order ~6.**
+- **Notch needs (almost) no normalization.** Each notch section has passband gain
+  ≤ 1 by construction, so — unlike the comb — the notch never inflates the signal.
+  The IIR biquad notch is *exactly* unity; the FIR notch overshoots by at most a
+  fraction of a dB (Hamming ripple). **Recommended: IIR notch order ~6** (tuned to
+  the exact mains, preserves EMG, ~30 ms); the FIR notch is unsuitable at any order
+  because its capped-tap notch is ~88 Hz wide and removes real EMG.
+- **High-order IIR must use second-order sections.** Expanding a cascaded biquad
+  into one degree-2N polynomial explodes numerically (poles pile up on the unit
+  circle); `notch_filter_verification.py` uses `sosfiltfilt` to stay stable.
+
 ### LMS Adaptive Filtering (Jupyter)
 
 Open [emg_lms.ipynb](emg_lms.ipynb) and run all cells. Uses a **Block NLMS** adaptive filter to estimate and subtract powerline interference.
@@ -169,12 +215,16 @@ Open [emg_lms.ipynb](emg_lms.ipynb) and run all cells. Uses a **Block NLMS** ada
 ```
 Raw signal
   └─ Bandpass filter (6–500 Hz, 4th-order Butterworth, zero-phase SOS)
-       ├─ FIR Notch      (firwin bandstop cascade)           [filter_comparison.py / filter_comparison_notebook.ipynb]
-       ├─ IIR Notch      (iirnotch biquad cascade, Q=30)     [emg_analysis.ipynb / filter_comparison.py]
-       ├─ FIR Comb       (y[n] = x[n] − x[n−M])             [emg_analysis.ipynb / filter_comparison.py]
-       ├─ IIR Comb       (y[n] = x[n] − x[n−M] + rᴹ·y[n−M])[filter_comparison.py]
+       ├─ FIR Notch      (firwin bandstop cascade)           [filter_comparison.py / notch_filter_verification.py]
+       ├─ IIR Notch      (iirnotch biquad cascade, Q=30)     [emg_analysis.ipynb / notch_filter_verification.py]
+       ├─ FIR Comb       (y[n] = x[n] − x[n−M])             [emg_analysis.ipynb / comb_filter_verification.py]
+       ├─ IIR Comb       (y[n] = x[n] − x[n−M] + rᴹ·y[n−M])[comb_filter_verification.py]
        └─ Block NLMS     (adaptive interference cancel)       [emg_lms.ipynb]
 ```
+
+The `*_verification.py` scripts additionally sweep the **cascade order (1–10)** of
+a filter family and study **passband normalization** — see
+[Filter Order & Normalization Studies](#filter-order--normalization-studies).
 
 ---
 
