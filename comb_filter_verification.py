@@ -41,9 +41,13 @@ RUN
     .venv/bin/python comb_filter_verification.py [recording_folder]
 
 Prints a table (passband peak, filtfilt dB, harmonic attenuation, RMS vs
-reference) for every filter x version x order, and writes two interactive
-Plotly HTML files (open in any browser; drag to zoom, click legend to toggle):
+reference, filtfilt apply time) for every filter x version x order 1..10, and
+writes interactive Plotly HTML files (open in any browser; drag to zoom, click
+legend to toggle):
 
+    comb_filter_results_table.html         -- color-coded results table with
+                                              per-filter timing; the
+                                              recommended order is highlighted
     comb_filter_freq_response.html         -- filtfilt gain in dB (log) vs
                                               frequency, one panel per filter x
                                               version, a line per order 1..5
@@ -60,6 +64,7 @@ Plotly HTML files (open in any browser; drag to zoom, click legend to toggle):
 
 from pathlib import Path
 import sys
+import time
 
 import numpy as np
 from scipy import signal as sig
@@ -74,13 +79,22 @@ DEFAULT_FOLDER = "emg_rec_20260625_092258"
 CHANNEL        = "emg_line_L"
 F0             = 49.97328   # Hz -- measured mains frequency
 R_M            = 0.9        # IIR comb feedback coefficient
-ORDERS         = (1, 2, 3, 4, 5)
+ORDERS         = tuple(range(1, 11))   # cascade orders 1..10
+
+
+def _shades(light, dark, n):
+    """n hex colors interpolated light->dark (for the per-order gradient)."""
+    lo = np.array([int(light[i:i+2], 16) for i in (1, 3, 5)], float)
+    hi = np.array([int(dark[i:i+2], 16)  for i in (1, 3, 5)], float)
+    return ["#%02X%02X%02X" % tuple(np.round(lo + (hi - lo) * f).astype(int))
+            for f in np.linspace(0, 1, n)]
+
 
 # Colors: grey reference + a light->dark gradient per filter, indexed by order
 C_BANDPASS  = "#555555"
 ORDER_SHADE = {
-    "FIR comb": ["#A5D6A7", "#66BB6A", "#43A047", "#2E7D32", "#1B5E20"],
-    "IIR comb": ["#EF9A9A", "#E57373", "#EF5350", "#C62828", "#8E0000"],
+    "FIR comb": _shades("#C8E6C9", "#1B5E20", len(ORDERS)),
+    "IIR comb": _shades("#FFCDD2", "#8E0000", len(ORDERS)),
 }
 
 
@@ -187,11 +201,16 @@ def main(folder=DEFAULT_FOLDER):
     print(f"Reference mains peaks:  @f0={ref_f0:.5f} V   @2f0={ref_2f0:.5f} V")
 
     # filtered[(name, version, order)] = y  (kept for the plots)
+    # rows = list of metric dicts (kept for the printed + HTML results tables)
     filtered = {}
+    rows = []
 
-    header = (f"{'filter':<9}{'version':<9}{'order':>6}{'pass|H|':>10}"
-              f"{'filtfilt dB':>13}{'att@50':>9}{'att@100':>9}"
-              f"{'RMS(V)':>11}{'x ref':>9}")
+    # dB columns are paired with their linear-scale equivalents:
+    #   flt lin = |H|^2 filtfilt gain factor   att x = reduction factor ref/filt
+    header = (f"{'filter':<9}{'version':<9}{'order':>6}{'taps':>6}{'pass|H|':>9}"
+              f"{'flt dB':>8}{'flt lin':>11}"
+              f"{'att50dB':>8}{'att50x':>10}{'att100dB':>9}{'att100x':>10}"
+              f"{'RMS(V)':>13}{'x ref':>11}{'ms':>8}")
 
     for name in ("FIR comb", "IIR comb"):
         print("\n" + "=" * len(header))
@@ -204,30 +223,112 @@ def main(folder=DEFAULT_FOLDER):
                 coeffs, _ = comb_coeffs(fs, order=order, normalize=norm)
                 b, a = coeffs[name]
                 peak = passband_peak(b, a)
-                y = sig.filtfilt(b, a, x_bp)
+                taps = max(len(b), len(a))
+
+                t0 = time.perf_counter()          # time the actual filtration
+                y  = sig.filtfilt(b, a, x_bp)
+                dt_ms = (time.perf_counter() - t0) * 1e3
                 filtered[(name, version, order)] = y
 
                 fr, mag = rfft_mag(y, fs)
-                att_f0 = 20 * np.log10(ref_f0 / (peak_near(fr, mag, F0) + 1e-20))
-                att_2f0 = 20 * np.log10(ref_2f0 / (peak_near(fr, mag, 2*F0) + 1e-20))
+                red_f0  = ref_f0  / (peak_near(fr, mag, F0)     + 1e-20)  # linear
+                red_2f0 = ref_2f0 / (peak_near(fr, mag, 2 * F0) + 1e-20)  # ratios
+                flt_lin = peak ** 2               # filtfilt gain, linear
                 r = rms(y)
-                print(f"{name:<9}{version:<9}{order:>6}{peak:>10.3f}"
-                      f"{20*np.log10(peak**2):>+12.1f}{att_f0:>+9.1f}"
-                      f"{att_2f0:>+9.1f}{r:>11.6f}{r/rms_ref:>9.2f}")
+                rows.append(dict(
+                    filter=name, version=version, order=order, taps=taps,
+                    peak=peak, flt_db=20 * np.log10(flt_lin), flt_lin=flt_lin,
+                    att_f0=20 * np.log10(red_f0),   att_f0_lin=red_f0,
+                    att_2f0=20 * np.log10(red_2f0), att_2f0_lin=red_2f0,
+                    rms=r, xref=r / rms_ref, time_ms=dt_ms))
+                print(f"{name:<9}{version:<9}{order:>6}{taps:>6}{peak:>9.3f}"
+                      f"{20*np.log10(flt_lin):>+8.1f}{flt_lin:>11.3g}"
+                      f"{20*np.log10(red_f0):>+8.1f}{red_f0:>10.3g}"
+                      f"{20*np.log10(red_2f0):>+9.1f}{red_2f0:>10.3g}"
+                      f"{r:>13.6f}{r/rms_ref:>11.2f}{dt_ms:>8.1f}")
             print("-" * len(header))
 
+    best = recommend_orders(rows)
     print("\nHOW ORDER IMPACTS FILTRATION")
     print("  * Notch rejection (att@50/att@100) gets DEEPER/steeper as order rises.")
-    print("  * ORIGINAL passband boost grows as order^ -> 'x ref' explodes")
-    print("    (FIR filtfilt peak = 4^order; order 5 => +60 dB, RMS blows up).")
+    print("  * ORIGINAL passband boost grows as 4^order (FIR) -> 'x ref' explodes.")
     print("  * PATCHED keeps pass|H| == 1.000 at EVERY order: sharper notches,")
     print("    no amplitude inflation ('x ref' stays <= 1).")
-    print("  * Stability holds for all orders (IIR poles keep radius r_m^(1/M)<1).\n")
+    print("  * Cost (taps, time) grows ~linearly with order.")
+    print("  * Stability holds for all orders (IIR poles keep radius r_m^(1/M)<1).")
+    print(f"\n  RECOMMENDED  ->  FIR: order {best['FIR comb']}   "
+          f"IIR: order {best['IIR comb']}   (see reasoning in the results table)\n")
 
     # ------------------------------- plots --------------------------------- #
+    plot_results_table_plotly(rows, best, folder)
     plot_freq_response_plotly(fs, scale="db")
     plot_freq_response_plotly(fs, scale="linear")
     plot_time_overlay_plotly(t, x_bp, rms_ref, filtered, folder)
+
+
+def recommend_orders(rows, target_att_db=20.0):
+    """
+    Best order per filter, judged on the PATCHED (amplitude-safe) variant:
+    the SMALLEST order whose mains rejection (att@f0) reaches target_att_db --
+    beyond that, extra order only costs taps/time/ringing (and, for FIR, extra
+    EMG loss) for little added rejection. If the target is never reached, take
+    the order with the most attenuation.
+    """
+    best = {}
+    for name in ("FIR comb", "IIR comb"):
+        pat = sorted((r for r in rows
+                      if r["filter"] == name and r["version"] == "PATCHED"),
+                     key=lambda r: r["order"])
+        reach = [r for r in pat if r["att_f0"] >= target_att_db]
+        best[name] = (reach[0] if reach
+                      else max(pat, key=lambda r: r["att_f0"]))["order"]
+    return best
+
+
+def plot_results_table_plotly(rows, best, folder):
+    """Color-coded results table (all filters x versions x orders + timing)."""
+    cols = ["Filter", "Version", "Order", "Taps", "pass|H|",
+            "filtfilt dB", "filtfilt |H|²",
+            "Att@50 dB", "Att@50 ×", "Att@100 dB", "Att@100 ×",
+            "RMS (V)", "x ref", "Time (ms)"]
+
+    def fmt(r):
+        return [r["filter"], r["version"], str(r["order"]), str(r["taps"]),
+                f"{r['peak']:.3f}",
+                f"{r['flt_db']:+.1f}", f"{r['flt_lin']:.3g}",
+                f"{r['att_f0']:+.1f}", f"{r['att_f0_lin']:.3g}",
+                f"{r['att_2f0']:+.1f}", f"{r['att_2f0_lin']:.3g}",
+                f"{r['rms']:.6f}", f"{r['xref']:.2f}", f"{r['time_ms']:.1f}"]
+
+    text = [fmt(r) for r in rows]
+    row_color = []
+    for r in rows:
+        if r["version"] == "PATCHED" and r["order"] == best[r["filter"]]:
+            row_color.append("#A5D6A7")                       # recommended
+        elif r["version"] == "ORIGINAL" and r["xref"] > 1.05:
+            row_color.append("#F8BBD0")                       # amplifies signal
+        elif r["version"] == "ORIGINAL":
+            row_color.append("#FCE4EC")
+        else:
+            row_color.append("#FFFFFF")                       # patched, ok
+    columns = list(zip(*text))                                # transpose
+    fill = [list(row_color) for _ in cols]
+
+    fig = go.Figure(go.Table(
+        header=dict(values=[f"<b>{c}</b>" for c in cols],
+                    fill_color="#1565C0", font=dict(color="white", size=11),
+                    align="center", height=30),
+        cells=dict(values=columns, fill_color=fill, align="center",
+                   font=dict(size=10), height=22)))
+    fig.update_layout(
+        title=(f"Comb-filter results -- orders {ORDERS[0]}..{ORDERS[-1]}  |  "
+               f"{folder}/{CHANNEL}"
+               f"<br><sup>green = recommended (FIR order {best['FIR comb']}, "
+               f"IIR order {best['IIR comb']}); pink = ORIGINAL variants that "
+               "amplify (x ref &gt; 1). Time = filtfilt apply time on this "
+               "signal.</sup>"),
+        template="plotly_white", height=1080, margin=dict(t=90, b=20))
+    _show_or_note(fig, "comb_filter_results_table.html")
 
 
 def _show_or_note(fig, out):
@@ -291,7 +392,7 @@ def plot_freq_response_plotly(fs, scale="db"):
         if linear:
             yr = [0, 1.15] if version == "PATCHED" else None
         else:
-            yr = [-80, 70]
+            yr = [-80, 130]   # order 10 FIR arch reaches +120 dB
         fig.update_yaxes(title_text=y_title, range=yr, row=row, col=col)
 
     scale_note = ("linear magnitude -- notches reach exactly 0; grey line = "
