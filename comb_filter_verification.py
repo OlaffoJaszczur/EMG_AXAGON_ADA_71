@@ -72,10 +72,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # --------------------------------------------------------------------------- #
-# Constants (kept identical to filter_comparison_notebook.ipynb)
+# Constants (kept identical to filter_comparison_notebook.ipynb)-@#
 # --------------------------------------------------------------------------- #
 RECORDINGS_DIR = Path("recordings")
-DEFAULT_FOLDER = "emg_rec_20260625_092258"
+DEFAULT_FOLDER = "emg_rec_20260616_113306"  #"emg_rec_20260625_092258"
 CHANNEL        = "emg_line_L"
 F0             = 49.97328   # Hz -- measured mains frequency
 R_M            = 0.9        # IIR comb feedback coefficient
